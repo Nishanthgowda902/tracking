@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import MapView from './components/MapView';
-import AddVehicle from './components/AddVehicle';
 import { AlertCircle } from 'lucide-react';
+import { subscribeToVehicleUpdates } from './services/api';
 
 function App() {
   const [vehicles, setVehicles] = useState({
@@ -13,7 +13,7 @@ function App() {
       isOn: false, 
       temperature: 25,
       doorLocked: true,
-      topic: 'vehicle/+/location'
+      topic: 'GPS/location/1'
     },
     'vehicle-2': { 
       id: 'vehicle-2', 
@@ -21,11 +21,45 @@ function App() {
       isOn: false, 
       temperature: 27,
       doorLocked: true,
-      topic: 'GPS/location/1'
+      topic: 'GPS/location/2'
     }
   });
 
   const [alerts, setAlerts] = useState([]);
+
+  useEffect(() => {
+    const subscriptions = {};
+
+    // Subscribe to updates for all non-custom vehicles regardless of engine state
+    Object.values(vehicles).forEach(vehicle => {
+      if (!vehicle.isCustom) {
+        const cleanup = subscribeToVehicleUpdates(vehicle, (data) => {
+          if (data.temperature !== undefined || data.latitude !== undefined) {
+            setVehicles(prev => ({
+              ...prev,
+              [vehicle.id]: {
+                ...prev[vehicle.id],
+                temperature: data.temperature ?? prev[vehicle.id].temperature,
+                latitude: data.latitude,
+                longitude: data.longitude
+              }
+            }));
+          }
+        });
+        
+        subscriptions[vehicle.id] = cleanup;
+      }
+    });
+
+    // Cleanup subscriptions
+    return () => {
+      Object.values(subscriptions).forEach(cleanup => {
+        if (typeof cleanup === 'function') {
+          cleanup();
+        }
+      });
+    };
+  }, []); // Only run on mount
 
   const toggleVehicle = (vehicleId) => {
     setVehicles(prev => ({
@@ -77,7 +111,7 @@ function App() {
       type: isOutside ? 'warning' : 'info'
     };
 
-    setAlerts(prev => [newAlert, ...prev].slice(0, 10)); // Keep last 10 alerts
+    setAlerts(prev => [newAlert, ...prev].slice(0, 10));
   };
 
   const dismissAlert = (alertId) => {
@@ -108,7 +142,6 @@ function App() {
         </nav>
 
         <main className="max-w-7xl mx-auto py-6 px-4">
-          {/* Alerts Section */}
           {alerts.length > 0 && (
             <div className="mb-6 space-y-2">
               {alerts.map(alert => (

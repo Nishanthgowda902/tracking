@@ -4,16 +4,34 @@ import AddVehicle from './AddVehicle';
 
 function Dashboard({ vehicles, toggleVehicle, toggleDoorLock, onAddVehicle }) {
   const [showAddVehicle, setShowAddVehicle] = useState(false);
-  const [lastUpdate] = React.useState('12:56:40 PM');
+  const [lastUpdate] = useState('12:56:40 PM');
+  const [isToggling, setIsToggling] = useState({});
   
   const handleToggle = async (vehicleId) => {
-    toggleVehicle(vehicleId);
-    if (!vehicles[vehicleId].isCustom) {
-      try {
+    if (isToggling[vehicleId]) return;
+    
+    setIsToggling(prev => ({ ...prev, [vehicleId]: true }));
+    
+    try {
+      if (!vehicles[vehicleId].isCustom) {
+        console.log(`Attempting to publish status for ${vehicleId}...`);
+        // Update local state first for better UX
+        toggleVehicle(vehicleId);
+        // Then publish the MQTT message
         await publishVehicleStatus(vehicleId, !vehicles[vehicleId].isOn);
-      } catch (error) {
-        console.error('Error publishing vehicle status:', error);
+        console.log(`Successfully toggled ${vehicleId} to ${!vehicles[vehicleId].isOn ? 'ON' : 'OFF'}`);
+      } else {
+        // For custom vehicles, just update the local state
+        toggleVehicle(vehicleId);
       }
+    } catch (error) {
+      console.error('Error publishing vehicle status:', error);
+      // Revert the state if MQTT publish fails
+      if (!vehicles[vehicleId].isCustom) {
+        toggleVehicle(vehicleId);
+      }
+    } finally {
+      setIsToggling(prev => ({ ...prev, [vehicleId]: false }));
     }
   };
 
@@ -23,7 +41,7 @@ function Dashboard({ vehicles, toggleVehicle, toggleDoorLock, onAddVehicle }) {
         <h2 className="text-xl font-semibold">Vehicle Status</h2>
         <button
           onClick={() => setShowAddVehicle(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
         >
           Add Vehicle
         </button>
@@ -58,7 +76,7 @@ function Dashboard({ vehicles, toggleVehicle, toggleDoorLock, onAddVehicle }) {
                 <div className="flex space-x-2">
                   <button
                     onClick={() => toggleDoorLock(vehicle.id)}
-                    className={`px-4 py-2 rounded-full focus:outline-none ${
+                    className={`px-4 py-2 rounded-full focus:outline-none transition-colors ${
                       vehicle.doorLocked ? 'bg-gray-300 text-gray-700' : 'bg-gray-300 text-gray-700'
                     }`}
                   >
@@ -66,7 +84,10 @@ function Dashboard({ vehicles, toggleVehicle, toggleDoorLock, onAddVehicle }) {
                   </button>
                   <button
                     onClick={() => handleToggle(vehicle.id)}
-                    className={`px-4 py-2 rounded-full focus:outline-none ${
+                    disabled={isToggling[vehicle.id]}
+                    className={`px-4 py-2 rounded-full focus:outline-none transition-colors ${
+                      isToggling[vehicle.id] ? 'opacity-50 cursor-not-allowed ' : ''
+                    } ${
                       vehicle.isOn ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-700'
                     }`}
                   >

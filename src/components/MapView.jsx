@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -30,63 +30,58 @@ function MapView({ vehicles, onGeofenceAlert }) {
     }
   };
 
-  const checkGeofence = (vehicleId, location) => {
+  const checkGeofence = useCallback((vehicleId, location) => {
     const geofence = geofences[vehicleId];
-    if (!geofence) return true; // If no geofence defined, consider it inside
+    if (!geofence) return true;
 
     const distance = L.latLng(geofence.center).distanceTo(L.latLng(location));
     const isOutside = distance > geofence.radius;
 
-    // Only trigger alert if status has changed
     if (geofenceStatus[vehicleId] !== isOutside) {
       setGeofenceStatus(prev => ({ ...prev, [vehicleId]: isOutside }));
       onGeofenceAlert(vehicleId, isOutside);
     }
 
     return !isOutside;
-  };
+  }, [geofenceStatus, onGeofenceAlert]);
 
   useEffect(() => {
-    const cleanupFunctions = {};
-    
+    const subscriptions = {};
+
     Object.values(vehicles).forEach(vehicle => {
-      if (vehicle.isOn) {
-        if (vehicle.isCustom) {
-          const location = [vehicle.latitude, vehicle.longitude];
-          setLocations(prev => ({
-            ...prev,
-            [vehicle.id]: location
-          }));
-          checkGeofence(vehicle.id, location);
-        } else {
-          cleanupFunctions[vehicle.id] = subscribeToVehicleUpdates(vehicle, (data) => {
-            if (data.latitude && data.longitude) {
-              const location = [data.latitude, data.longitude];
-              setLocations(prev => ({
-                ...prev,
-                [vehicle.id]: location
-              }));
-              checkGeofence(vehicle.id, location);
-              setError(null);
-            }
-          });
-        }
-      } else {
-        setLocations(prev => {
-          const newLocations = { ...prev };
-          delete newLocations[vehicle.id];
-          return newLocations;
+      // Subscribe to all non-custom vehicles regardless of engine state
+      if (!vehicle.isCustom) {
+        subscriptions[vehicle.id] = subscribeToVehicleUpdates(vehicle, (data) => {
+          if (data.latitude && data.longitude) {
+            const location = [data.latitude, data.longitude];
+            setLocations(prev => ({
+              ...prev,
+              [vehicle.id]: location
+            }));
+            checkGeofence(vehicle.id, location);
+            setError(null);
+          }
         });
+      } else if (vehicle.latitude && vehicle.longitude) {
+        // Handle custom vehicles
+        const location = [vehicle.latitude, vehicle.longitude];
+        setLocations(prev => ({
+          ...prev,
+          [vehicle.id]: location
+        }));
+        checkGeofence(vehicle.id, location);
       }
     });
 
     return () => {
-      Object.values(cleanupFunctions).forEach(cleanup => cleanup());
+      Object.values(subscriptions).forEach(cleanup => cleanup());
     };
-  }, [vehicles]);
+  }, [vehicles, checkGeofence]);
 
   const getMarkerColor = (vehicleId) => {
-    return geofenceStatus[vehicleId] ? 'red' : 'blue';
+    const vehicle = vehicles[vehicleId];
+    if (geofenceStatus[vehicleId]) return 'red';
+    return vehicle.isOn ? 'green' : 'blue';
   };
 
   return (
@@ -106,7 +101,7 @@ function MapView({ vehicles, onGeofenceAlert }) {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          
+
           {/* Draw geofence circles */}
           {Object.entries(geofences).map(([vehicleId, geofence]) => (
             <Circle
@@ -123,7 +118,7 @@ function MapView({ vehicles, onGeofenceAlert }) {
 
           {/* Draw vehicle markers */}
           {Object.entries(vehicles).map(([vehicleId, vehicle]) => (
-            vehicle.isOn && (locations[vehicleId] || vehicle.isCustom) && (
+            (locations[vehicleId] || (vehicle.isCustom && vehicle.latitude && vehicle.longitude)) && (
               <Marker 
                 key={vehicleId} 
                 position={vehicle.isCustom ? [vehicle.latitude, vehicle.longitude] : locations[vehicleId]}
